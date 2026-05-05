@@ -640,7 +640,7 @@ def processcommand(command):
         except:
             speak("Memory not cleared.")
 
-    elif "chat" in command:
+    elif "chat" in command or "what is" in command or "who is" in command or "how to" in command or "question" in command:
         speak("Sure, ask me anything.")
         with sr.Microphone() as source:
             print("Listening...")
@@ -651,11 +651,11 @@ def processcommand(command):
             print("You:", command_text)
 
             # Extract memory from user input
-            extract_memory(command_text)
+           # extract_memory(command_text)
 
             # Build context from memory
-            context = build_context()
-            prompt = context + "\nUser: " + command_text + "\nAI:"
+           # context = build_context()
+            prompt =  "\nUser: " + command_text + "\nAI:"
 
             # Get AI response from client.py
             answer = get_result(prompt)
