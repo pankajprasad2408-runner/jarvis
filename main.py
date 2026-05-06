@@ -15,6 +15,11 @@ from dotenv import load_dotenv
 
 recognizer = sr.Recognizer()
 
+import ctypes
+import time
+import pyautogui
+import subprocess
+
 #🎙️ AI Voice
 async def speak_async(text):
     filename = f"voice_{uuid.uuid4()}.mp3"
@@ -469,6 +474,139 @@ def get_weather(city):
         print("Weather error:", e)
         return "Something went wrong while getting weather."
 
+# ----------------- Screen control (Windows) -----------------
+def turn_off_screen():
+    """Turn off the monitor (Windows)."""
+    try:
+        if os.name == 'nt':
+            HWND_BROADCAST = 0xFFFF
+            WM_SYSCOMMAND = 0x0112
+            SC_MONITORPOWER = 0xF170
+            ctypes.windll.user32.SendMessageW(HWND_BROADCAST, WM_SYSCOMMAND, SC_MONITORPOWER, 2)
+            speak("Turning off the screen.")
+        else:
+            speak("Screen control not implemented for this OS.")
+    except Exception as e:
+        print("Screen off error:", e)
+        speak("Failed to turn off the screen.")
+
+def wake_screen():
+    """Wake the monitor by simulating minimal mouse movement (Windows)."""
+    try:
+        if os.name == 'nt':
+            # Move mouse by 1 pixel and back to wake screen
+            MOUSEEVENTF_MOVE = 0x0001
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, 1, 0, 0, 0)
+            time.sleep(0.05)
+            ctypes.windll.user32.mouse_event(MOUSEEVENTF_MOVE, -1, 0, 0, 0)
+            speak("Waking up the screen.")
+        else:
+            speak("Screen control not implemented for this OS.")
+    except Exception as e:
+        print("Wake error:", e)
+        speak("Failed to wake the screen.")
+
+def lock_screen():
+    """Lock the workstation (Windows)."""
+    try:
+        if os.name == 'nt':
+            ctypes.windll.user32.LockWorkStation()
+            speak("Locking the workstation.")
+        else:
+            speak("Screen lock not implemented for this OS.")
+    except Exception as e:
+        print("Lock error:", e)
+        speak("Failed to lock the workstation.")
+
+# ----------------- App / Search Bar Controls -----------------
+pyautogui.FAILSAFE = False
+pyautogui.PAUSE = 0.03
+
+def open_windows_search_and_search(query: str):
+    """Open Windows Search (Win+S), type the query and press Enter."""
+    try:
+        pyautogui.hotkey('win', 's')
+        time.sleep(0.4)
+        pyautogui.typewrite(query, interval=0.03)
+        pyautogui.press('enter')
+        speak(f"Searched system for {query}.")
+    except Exception as e:
+        print("System search error:", e)
+        speak("Failed to perform system search.")
+
+def search_in_app_and_enter(query: str):
+    """Trigger Ctrl+F in the active app, paste query and press Enter.
+
+    Uses the Windows `clip` utility to set the clipboard and paste the
+    search term (more reliable than typing). Falls back to typing if
+    clipboard/paste isn't available.
+    """
+    try:
+        # Open the app's find/search dialog
+        pyautogui.hotkey('ctrl', 'f')
+        # Give the UI a moment to open and focus the search box
+        time.sleep(0.35)
+
+        pasted = False
+        # Try using Windows `clip` to set clipboard and paste
+        try:
+            subprocess.run('clip', input=query.encode('utf-8'), check=True, shell=True)
+            pyautogui.hotkey('ctrl', 'v')
+            pasted = True
+        except Exception:
+            pasted = False
+
+        # Fallback to typing if paste didn't work
+        if not pasted:
+            pyautogui.typewrite(query, interval=0.03)
+
+        time.sleep(0.05)
+        pyautogui.press('enter')
+        speak(f"Searched in app for {query}.")
+    except Exception as e:
+        print("computer search error:", e)
+        speak("Failed to search inside the computer.")
+
+def comp_search(query: str):
+    """Trigger Windows Search (alt + space) without typing."""
+    try:
+        pyautogui.hotkey('alt', 'space')
+        speak("Opened computer search.")
+        pyautogui.typewrite(query, interval=0.03)
+        pyautogui.press('enter')
+    except Exception as e:
+        print("Computer search error:", e)
+        speak("Failed to open computer search.")
+
+
+def minimize_window():
+    try:
+        pyautogui.hotkey('win', 'down')
+        speak("Window minimized.")
+    except Exception as e:
+        print("Minimize error:", e)
+        speak("Failed to minimize the window.")
+
+def maximize_window():
+    try:
+        pyautogui.hotkey('win', 'up')
+        speak("Window maximized.")
+    except Exception as e:
+        print("Maximize error:", e)
+        speak("Failed to maximize the window.")
+
+def close_window():
+    try:
+        pyautogui.hotkey('alt', 'f4')
+        speak("Closed the window.")
+    except Exception as e:
+        print("Close error:", e)
+        speak("Failed to close the window.")
+
+# ------------------------------------------------------------
+
+# ------------------------------------------------------------
+
 # 🎯 Command Handler
 def processcommand(command):
     command = command.lower()
@@ -532,11 +670,7 @@ def processcommand(command):
         webbrowser.open("https://youtube.com")
         speak("Opening YouTube")
 
-    # 🔍 Search
-    elif "search" in command:
-        query = command.replace("search", "")
-        webbrowser.open(f"https://www.google.com/search?q={query}")
-        speak(f"Searching {query}")
+
 
     # 🎵 Play Song (need upgrade)
     elif "play" in command:
@@ -581,7 +715,52 @@ def processcommand(command):
         os.system("start chrome")
     
 
+    # ----------------- Search & Window control commands -----------------
+    elif any(kw in command for kw in ["system search", "search system", "search windows", "search computer"]):
+        speak("What should I search for on your computer?")
+        term = listen(timeout=6, phrase_limit=8)
+        if term:
+            open_windows_search_and_search(term)
+        else:
+            speak("I didn't catch the search term.")
+
+    elif any(kw in command for kw in ["search in app", "app search", "find in app", "search this app"]):
+        speak("What should I search for inside the app?")
+        term = listen(timeout=6, phrase_limit=8)
+        if term:
+            search_in_app_and_enter(term)
+        else:
+            speak("I didn't catch the search term.")
+
+    elif any(kw in command for kw in ["minimize window", "minimise window", "minimize app", "minimise app"]):
+        minimize_window()
+
+    elif any(kw in command for kw in ["computer search", "search in computer "]):
+        speak("What should I search for inside the app?")
+        term = listen(timeout=6, phrase_limit=8)
+        if term:
+            comp_search(term)
+        else:
+            speak("I didn't catch the search term.")
+
+
+    elif any(kw in command for kw in ["maximize window", "maximize app", "maximize", "maximise"]):
+        maximize_window()
+
+    elif any(kw in command for kw in ["close window", "close app", "close application", "exit app"]):
+        close_window()
+
     # 🧠 Memory commands
+    # 🖥️ Screen control commands
+    elif any(kw in command for kw in ["turn screen off", "turn off screen", "switch off screen", "turn the screen off"]):
+        turn_off_screen()
+
+    elif any(kw in command for kw in ["turn screen on", "turn on screen", "wake screen", "wake up screen", "turn the screen on"]):
+        wake_screen()
+
+    elif "lock screen" in command or "lock workstation" in command:
+        lock_screen()
+
     elif "what do you remember" in command or "tell me about myself" in command:
         memory = load_memory()
         summary = summarize_memory_for_speech(memory)
@@ -673,7 +852,14 @@ def processcommand(command):
     elif "exit" in command or "stop" in command or "goodbye" in command or "bye-bye" in command:
         speak("Goodbye sir!")
         exit()
- 
+
+    # 🔍 Search
+    elif "search" in command:
+        query = command.replace("search", "")
+        webbrowser.open(f"https://www.google.com/search?q={query}")
+        speak(f"Searching {query}")
+
+
     # ── Fallback ──────────────────────────
     else:
         speak("I didn't understand that command.")
@@ -689,35 +875,65 @@ if __name__ == "__main__":
 
     interaction_count = 0
 
+    # Configuration: when wake word is heard, stay in active mode for this many seconds
+    ACTIVE_MODE_DURATION = 12
+
     while True:
         try:
             with sr.Microphone() as source:
-                print("Listening...")
+                print("Listening for wake word...")
                 recognizer.adjust_for_ambient_noise(source)
                 audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
 
             word = recognizer.recognize_google(audio).lower()
             print("You:", word)
 
-            if "matrix" in word.lower():
+            # If wake word detected, enter active listening mode
+            if "matrix" in word:
                 speak("Yes sir")
-                while True:
-                    with sr.Microphone() as source:
-                        print("Command...")
-                        recognizer.adjust_for_ambient_noise(source)
-                        audio = recognizer.listen(source, timeout=5, phrase_time_limit=6)
+                active_start = datetime.datetime.now()
+                while (datetime.datetime.now() - active_start).total_seconds() < ACTIVE_MODE_DURATION:
+                    try:
+                        with sr.Microphone() as source:
+                            print("Active - listening for command...")
+                            recognizer.adjust_for_ambient_noise(source)
+                            audio = recognizer.listen(source, timeout=ACTIVE_MODE_DURATION, phrase_time_limit=8)
 
-                    command = recognizer.recognize_google(audio).lower()
-                    print("Command:", command)
+                        command = recognizer.recognize_google(audio).lower()
+                        print("Command:", command)
 
-                    # Process command
-                    processcommand(command)
+                        # If user says exit phrases, leave active mode entirely
+                        if any(phrase in command for phrase in ["exit", "stop", "goodbye", "thank you", "bye"]):
+                            speak("Exiting. Say matrix when you need me again.")
+                            break
 
-                    # Periodic memory cleanup (every 50 interactions)
-                    interaction_count += 1
-                    if interaction_count % 50 == 0:
-                        cleanup_memory(days_old=30)
-                        print("Memory cleanup completed.")
+                        # Process command
+                        processcommand(command)
 
+                        # reset active timer after a successful command so user has more time
+                        active_start = datetime.datetime.now()
+
+                        # Periodic memory cleanup (every 50 interactions)
+                        interaction_count += 1
+                        if interaction_count % 50 == 0:
+                            cleanup_memory(days_old=30)
+                            print("Memory cleanup completed.")
+
+                    except sr.UnknownValueError:
+                        speak("Sorry, I didn't catch that.")
+                    except sr.RequestError:
+                        speak("Speech service seems to be down.")
+                    except Exception as e:
+                        print("Active listen error:", e)
+                        speak("An error occurred while listening.")
+
+            # else keep waiting for wake word
+
+        except sr.UnknownValueError:
+            # ignore and continue listening for wake word
+            pass
+        except sr.RequestError:
+            speak("Speech service seems to be down. Retrying...")
+            time.sleep(1)
         except Exception as e:
             print("Error:", e)
