@@ -15,10 +15,39 @@ from dotenv import load_dotenv
 
 recognizer = sr.Recognizer()
 
+# Microphone configuration: optional index and calibration utilities
+MIC_INDEX = None
+
+def list_microphones():
+    try:
+        names = sr.Microphone.list_microphone_names()
+        print("Available microphones:")
+        for i, name in enumerate(names):
+            print(f"{i}: {name}")
+        return names
+    except Exception as e:
+        print("Error listing microphones:", e)
+        return []
+
+def calibrate_mic(mic_index=None, duration=1.5):
+    try:
+        mic_index = mic_index if mic_index is not None else MIC_INDEX
+        with sr.Microphone(device_index=mic_index) as source:
+            print("Calibrating microphone for ambient noise. Please be silent...")
+            recognizer.dynamic_energy_threshold = True
+            recognizer.pause_threshold = 0.6
+            recognizer.non_speaking_duration = 0.5
+            recognizer.adjust_for_ambient_noise(source, duration=duration)
+            print(f"Calibration complete. Energy threshold: {recognizer.energy_threshold}")
+    except Exception as e:
+        print("Calibration error:", e)
+
 import ctypes
 import time
 import pyautogui
 import subprocess
+import threading
+import sys
 
 #🎙️ AI Voice
 async def speak_async(text):
@@ -30,9 +59,9 @@ async def speak_async(text):
         buffer=512
     )
     communicate = edge_tts.Communicate(text,  voice="en-GB-RyanNeural",
-        rate="+10%",
-        pitch="+3Hz",
-        volume="+20%",)
+        rate="+20%",
+        pitch="-12Hz",
+        volume="+100%",)
     await communicate.save(filename)
     pygame.mixer.init()
     pygame.mixer.music.load(filename)
@@ -413,20 +442,30 @@ def build_context():
 ###
 
 #  🎧 Listen Function
-def listen(timeout=5, phrase_limit=8) -> str | None:
-    """Listen from mic and return recognised text, or None on failure."""
+def listen(timeout=5, phrase_limit=8, mic_index=None) -> str | None:
+    """Listen from mic and return recognised text, or None on failure.
+
+    Uses one-time calibration. Pass `mic_index` or rely on global `MIC_INDEX`.
+    """
+    mic_index = MIC_INDEX if mic_index is None else mic_index
     try:
-        with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source)
+        with sr.Microphone(device_index=mic_index) as source:
+            print("Listening... (timeout=%s, phrase_limit=%s)" % (timeout, phrase_limit))
             audio = recognizer.listen(source, timeout=timeout, phrase_time_limit=phrase_limit)
-        return recognizer.recognize_google(audio).strip()
-    except sr.UnknownValueError:
-        speak("Sorry, I didn't catch that.")
-    except sr.RequestError:
-        speak("Speech service seems to be down.")
+        try:
+            return recognizer.recognize_google(audio).strip()
+        except sr.UnknownValueError:
+            speak("Sorry, I didn't catch that.")
+            return None
+        except sr.RequestError:
+            speak("Speech service seems to be down.")
+            return None
+    except sr.WaitTimeoutError:
+        print("Listen timeout (no speech detected).")
+        return None
     except Exception as e:
         print("Listen error:", e)
-    return None
+        return None
 
 # 🌦️ Weather Function
 def get_weather(city):
@@ -696,17 +735,24 @@ def processcommand(command):
     elif "weather" in command:
         speak("Which city?")
 
-        with sr.Microphone() as source:
+        with sr.Microphone(device_index=MIC_INDEX) as source:
             print("Listening for city...")
-            recognizer.adjust_for_ambient_noise(source)
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
 
-        city = recognizer.recognize_google(audio)
-        city = city.lower().replace("india", "").replace("city", "").strip().title()
-        print("City:", city)
+        try:
+            city = recognizer.recognize_google(audio)
+            city = city.lower().replace("india", "").replace("city", "").strip().title()
+            print("City:", city)
 
-        result = get_weather(city)
-        speak(result)
+            result = get_weather(city)
+            speak(result)
+        except sr.UnknownValueError:
+            speak("Sorry, I didn't catch the city.")
+        except sr.RequestError:
+            speak("Speech service seems to be down.")
+        except Exception as e:
+            print("Weather recognition error:", e)
+            speak("Sorry, I couldn't get the city name.")
     # open files
     elif "open code" in command:
         os.system("code")  
@@ -774,22 +820,25 @@ def processcommand(command):
 
     elif "remember this" in command or "remember that" in command:
         speak("What would you like me to remember?")
-        with sr.Microphone() as source:
+        with sr.Microphone(device_index=MIC_INDEX) as source:
             print("Listening for memory...")
-            recognizer.adjust_for_ambient_noise(source)
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
         try:
             memory_text = recognizer.recognize_google(audio)
             extract_memory(memory_text)
             speak("Got it! I'll remember that.")
-        except:
+        except sr.UnknownValueError:
             speak("Sorry, I didn't catch that.")
+        except sr.RequestError:
+            speak("Speech service seems to be down.")
+        except Exception as e:
+            print("Memory recognition error:", e)
+            speak("Sorry, I couldn't record that.")
 
     elif "search memory" in command or "find in memory" in command:
         speak("What would you like me to search for?")
-        with sr.Microphone() as source:
+        with sr.Microphone(device_index=MIC_INDEX) as source:
             print("Listening for search term...")
-            recognizer.adjust_for_ambient_noise(source)
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
         try:
             search_term = recognizer.recognize_google(audio)
@@ -800,13 +849,17 @@ def processcommand(command):
                     speak(f"{category}: {', '.join(str(item) for item in items[:3])}")
             else:
                 speak(f"I couldn't find anything about {search_term} in my memory.")
-        except:
+        except sr.UnknownValueError:
             speak("Sorry, I didn't catch that.")
+        except sr.RequestError:
+            speak("Speech service seems to be down.")
+        except Exception as e:
+            print("Search memory recognition error:", e)
+            speak("Sorry, I couldn't understand the search term.")
 
     elif "clear memory" in command or "forget everything" in command:
         speak("Are you sure you want me to clear all memory? Say 'yes' to confirm.")
-        with sr.Microphone() as source:
-            recognizer.adjust_for_ambient_noise(source)
+        with sr.Microphone(device_index=MIC_INDEX) as source:
             audio = recognizer.listen(source, timeout=3, phrase_time_limit=2)
         try:
             confirmation = recognizer.recognize_google(audio).lower()
@@ -816,14 +869,18 @@ def processcommand(command):
                 speak("Memory cleared. Starting fresh!")
             else:
                 speak("Memory not cleared.")
-        except:
+        except sr.UnknownValueError:
+            speak("Memory not cleared.")
+        except sr.RequestError:
+            speak("Speech service seems to be down.")
+        except Exception as e:
+            print("Clear memory recognition error:", e)
             speak("Memory not cleared.")
 
-    elif "chat" in command or "what is" in command or "who is" in command or "how to" in command or "question" in command:
+    elif "chat" in command or "go to ai" in command or "who is" in command or "how to" in command or "question" in command:
         speak("Sure, ask me anything.")
-        with sr.Microphone() as source:
+        with sr.Microphone(device_index=MIC_INDEX) as source:
             print("Listening...")
-            recognizer.adjust_for_ambient_noise(source)
             audio = recognizer.listen(source, timeout=5, phrase_time_limit=10)
         try:
             command_text = recognizer.recognize_google(audio)
@@ -831,10 +888,10 @@ def processcommand(command):
 
             # Extract memory from user input
            # extract_memory(command_text)
-
-            # Build context from memory
-           # context = build_context()
-            prompt =  "\nUser: " + command_text + "\nAI:"
+            
+            context = "give me to the point answer under 50 words."
+            
+            prompt =  "\nUser: " + command_text + context +"\nAI:"
 
             # Get AI response from client.py
             answer = get_result(prompt)
@@ -871,6 +928,65 @@ def processcommand(command):
 
 # MAIN LOOP
 if __name__ == "__main__":
+    # Choose input mode: voice, text, or both
+    print("Input mode options: voice, text, both (default: both)")
+    mode = input("Choose input mode [voice/text/both]: ").strip().lower()
+    if mode not in ("voice", "text", "both", ""):
+        mode = "both"
+    if mode == "":
+        mode = "both"
+
+    stop_event = threading.Event()
+
+    # Start a background thread to accept typed commands when requested
+    if mode in ("text", "both"):
+        def text_input_loop():
+            print("Text input enabled — type commands and press Enter.")
+            while not stop_event.is_set():
+                try:
+                    cmd = input().strip()
+                    if not cmd:
+                        continue
+                    try:
+                        processcommand(cmd)
+                    except SystemExit:
+                        os._exit(0)
+                except (EOFError, KeyboardInterrupt):
+                    break
+                except Exception as e:
+                    print("Text input error:", e)
+
+        t = threading.Thread(target=text_input_loop, daemon=True)
+        t.start()
+
+    # If text-only mode, keep main thread idle while text thread handles commands
+    if mode == "text":
+        speak("Text input mode activated. Type your commands anytime.")
+        try:
+            while True:
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            stop_event.set()
+            speak("Exiting.")
+            sys.exit(0)
+
+    # Voice (or both) mode — microphone setup, calibration, then wake-word loop
+    if mode in ("voice", "both"):
+        try:
+            print("\nMicrophone configuration:")
+            mics = list_microphones()
+            if mics:
+                sel = input("Enter microphone index to use (press Enter to use default): ").strip()
+                if sel != "":
+                    try:
+                        MIC_INDEX = int(sel)
+                    except Exception:
+                        print("Invalid index; using default microphone.")
+            # Calibrate once for ambient noise
+            calibrate_mic(MIC_INDEX)
+        except Exception as e:
+            print("Microphone setup error:", e)
+
     speak("Hello pankaj,  I am matrix, your personal assistant. How can I help you today?")
 
     interaction_count = 0
@@ -880,12 +996,10 @@ if __name__ == "__main__":
 
     while True:
         try:
-            with sr.Microphone() as source:
-                print("Listening for wake word...")
-                recognizer.adjust_for_ambient_noise(source)
-                audio = recognizer.listen(source, timeout=5, phrase_time_limit=5)
-
-            word = recognizer.recognize_google(audio).lower()
+            word = listen(timeout=5, phrase_limit=5)
+            if not word:
+                continue
+            word = word.lower()
             print("You:", word)
 
             # If wake word detected, enter active listening mode
@@ -894,12 +1008,11 @@ if __name__ == "__main__":
                 active_start = datetime.datetime.now()
                 while (datetime.datetime.now() - active_start).total_seconds() < ACTIVE_MODE_DURATION:
                     try:
-                        with sr.Microphone() as source:
-                            print("Active - listening for command...")
-                            recognizer.adjust_for_ambient_noise(source)
-                            audio = recognizer.listen(source, timeout=ACTIVE_MODE_DURATION, phrase_time_limit=8)
-
-                        command = recognizer.recognize_google(audio).lower()
+                        command = listen(timeout=ACTIVE_MODE_DURATION, phrase_limit=8)
+                        if not command:
+                            speak("Sorry, I didn't catch that.")
+                            continue
+                        command = command.lower()
                         print("Command:", command)
 
                         # If user says exit phrases, leave active mode entirely
